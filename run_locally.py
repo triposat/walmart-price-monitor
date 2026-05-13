@@ -37,7 +37,12 @@ from curl_cffi import requests as curl_requests
 from scraper import WalmartPriceScraper
 from config import ProductConfig
 from alerts import send_alert, notifier
-import check_once
+from storage import (
+    prune_old_entries,
+    get_baseline_price,
+    get_last_alert_time,
+    decide,
+)
 
 # If no real proxies, monkey-patch curl_requests.get to drop the proxy kwarg.
 if NO_PROXY:
@@ -56,7 +61,7 @@ def run_one_cycle():
     products = TypeAdapter(list[ProductConfig]).validate_python(data["products"])
 
     db = TinyDB("price_history.json")
-    check_once.prune_old_entries(db)
+    prune_old_entries(db)
     scraper = WalmartPriceScraper()
     now = datetime.now()
 
@@ -69,25 +74,29 @@ def run_one_cycle():
             failures += 1
             continue
 
-        baseline = check_once.get_baseline_price(db, product.item_id)
-        last_alert_at = check_once.get_last_alert_time(db, product.item_id)
-        should_alert, reason = check_once.decide(result.price, baseline, last_alert_at, now)
+        baseline = get_baseline_price(db, product.item_id)
+        last_alert_at = get_last_alert_time(db, product.item_id)
+        should_alert, reason = decide(result.price, baseline, last_alert_at, now)
 
-        record = result.model_dump(mode="json")
-        record["alerted"] = should_alert
-        db.insert(record)
         successes += 1
+        delivered = False
 
         if should_alert:
             assert baseline is not None
             logger.success(f"DROP! {product.name}: ${result.price:.2f} | {reason}")
-            send_alert(result, product, baseline)
-            alerts_sent += 1
+            delivered = send_alert(result, product, baseline)
+            if delivered:
+                alerts_sent += 1
         elif baseline is not None and result.price < baseline:
             logger.info(f"{product.name}: ${result.price:.2f} | suppressed: {reason}")
             suppressed += 1
         else:
             logger.info(f"{product.name}: ${result.price:.2f} | {reason}")
+
+        # Mark alerted only on confirmed delivery; matches check_once.py semantics.
+        record = result.model_dump(mode="json")
+        record["alerted"] = delivered
+        db.insert(record)
 
     logger.info(
         f"Cycle done. {successes} ok, {failures} failed, "

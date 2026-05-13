@@ -106,24 +106,32 @@ def _format_body(result: PriceResult, prior_price: float) -> str:
     return "\n".join(lines)
 
 
-def send_alert(result: PriceResult, product: ProductConfig, prior_price: float):
-    """Send a price-drop alert. The caller has already verified current < prior."""
+def send_alert(result: PriceResult, product: ProductConfig, prior_price: float) -> bool:
+    """Send a price-drop alert. Returns True if delivery confirmed, False otherwise.
+
+    The caller uses the return value to decide whether to mark the reading as
+    alerted in TinyDB. Marking on success only is what keeps the cooldown
+    correct across transient Slack/Apprise outages.
+    """
     assert result.price is not None, "send_alert requires a non-None result.price"
 
     title = f"Price Drop: {product.name}"
     body = _format_body(result, prior_price)
 
-    if len(notifier) > 0:
-        # Apprise returns False when delivery fails. Without this check, a
-        # broken webhook would still log success and the failure would be silent.
-        if notifier.notify(title=title, body=body):
-            logger.success(
-                f"Alert sent for {result.item_id}: ${result.price:.2f} (was ${prior_price:.2f})"
-            )
-        else:
-            logger.error(
-                f"Alert delivery failed for {result.item_id}: "
-                f"${result.price:.2f} (was ${prior_price:.2f})"
-            )
-    else:
+    if len(notifier) == 0:
         logger.warning(f"No notification services configured! {title}")
+        return False
+
+    # Apprise returns False when delivery fails. Without this check, a
+    # broken webhook would still log success and the failure would be silent.
+    if notifier.notify(title=title, body=body):
+        logger.success(
+            f"Alert sent for {result.item_id}: ${result.price:.2f} (was ${prior_price:.2f})"
+        )
+        return True
+
+    logger.error(
+        f"Alert delivery failed for {result.item_id}: "
+        f"${result.price:.2f} (was ${prior_price:.2f})"
+    )
+    return False

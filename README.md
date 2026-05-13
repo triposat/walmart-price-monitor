@@ -48,7 +48,7 @@ If any condition fails, the script still saves the reading to history but
 does not send a notification.
 
 The four limits, plus the history retention setting, are defined as constants
-near the top of `check_once.py`:
+near the top of `storage.py`:
 
 ```python
 MIN_DROP_PCT = 2.0
@@ -68,19 +68,18 @@ Adjust these values to change the alert behavior. For example:
 When an alert fires, Slack receives a message like:
 
 ```
-Price Drop: Great Value Paper Towels
+Price Drop: Apple AirPods 4
 
-Great Value Ultra Strong Paper Towels (12 Double Rolls)
+Apple AirPods 4
 
-Previous: $14.97
-Current:  $11.98
-Drop:     $2.99 (-19.97%)
-vs Was:   $16.97 (-$4.99 / -29.41%)
-Per unit: $1.14/100 ct
-Tags:     ROLLBACK | EVENT-PRICING
-Stock:    Limited stock
+Previous: $103.00
+Current:  $99.00
+Drop:     $4.00 (-3.88%)
+vs Was:   $129.99 (-$30.99 / -23.84%)
+Per unit: $99.00/count
+Tags:     ROLLBACK
 
-https://www.walmart.com/ip/186015888
+https://www.walmart.com/ip/11381374703
 ```
 
 The optional lines only appear when relevant:
@@ -105,8 +104,11 @@ knows what kind of price they are looking at.
 ├── .github/workflows/monitor.yml   # cron schedule and run logic
 ├── config.py                       # loads proxies from environment, validates products
 ├── scraper.py                      # curl_cffi scraper + __NEXT_DATA__ parser
+├── storage.py                      # TinyDB persistence + decision layer + thresholds
 ├── alerts.py                       # Apprise multi-channel alerts (Slack-friendly format)
 ├── check_once.py                   # entry point: runs one price check per execution
+├── run_locally.py                  # local continuous runner (no proxies, for testing)
+├── force_alert.py                  # one-shot alert sender to verify your Slack setup
 ├── products.json                   # list of Walmart item IDs to monitor
 ├── requirements.txt
 ├── .gitignore
@@ -203,20 +205,30 @@ apprise -vv -t "test" -b "Price monitor test" "slack://T0000/B0000/XYZ"
 
 A message should appear in the chosen Slack channel within a few seconds.
 
+To verify the full alert formatting (not just delivery), run `force_alert.py`,
+which calls `send_alert()` with test data matching the example shown above:
+
+```bash
+APPRISE_URLS="slack://T0000/B0000/XYZ" python force_alert.py
+```
+
+The resulting Slack message renders exactly what a real price-drop alert
+would look like, with all optional rows (`vs Was`, `Per unit`, `Tags`) populated.
+
 ### 5. Edit `products.json`
 
 Replace the example item IDs with the products you want to monitor. Each
 entry needs two fields: `item_id` and a recognizable `name`. The `item_id` is
 the numeric ID at the end of a Walmart product URL. For example, the URL
-`https://www.walmart.com/ip/Great-Value-Ultra-Strong-Paper-Towels-Split-Sheets-12-Double-Rolls/186015888`
-has the item ID `186015888`.
+`https://www.walmart.com/ip/Apple-AirPods-4/11381374703` has the item ID
+`11381374703`.
 
 ```json
-{"item_id": "186015888", "name": "Great Value Paper Towels"}
+{"item_id": "11381374703", "name": "Apple AirPods 4"}
 ```
 
 There is no target price field. An alert is sent when a price drop crosses
-the thresholds defined in `check_once.py`. Commit and push your changes when
+the thresholds defined in `storage.py`. Commit and push your changes when
 you are done.
 
 ### 6. Trigger the first run manually
@@ -269,7 +281,7 @@ Edit the `cron` value in `.github/workflows/monitor.yml`:
   hit the challenge on most Walmart requests.
 - **No alerts arrive in Slack even when prices drop.** First verify the
   Slack URL with the `apprise -vv` command from step 4. Then check that the
-  price drop crosses the thresholds in `check_once.py`. A $0.10 drop on a
+  price drop crosses the thresholds in `storage.py`. A $0.10 drop on a
   $30 item is below the default 2% threshold and will not trigger an alert.
 - **The workflow is stuck in the "queued" state.** GitHub's free runners can
   be delayed during periods of high demand. The queue usually clears within

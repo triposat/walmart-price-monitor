@@ -1,15 +1,6 @@
 {
   "products": [
-    {"item_id": "5911796258",  "name": "PS5 Slim Refurbished (Digital)"},
-    {"item_id": "2211930094",  "name": "PS5 Disc Refurbished"},
-    {"item_id": "365521617",   "name": "PS4 Slim 1TB Refurbished"},
-    {"item_id": "541509910",   "name": "Xbox One X 1TB Refurbished"},
-    {"item_id": "838946660",   "name": "ETEPEHI 3-in-1 Wireless Charger"},
-    {"item_id": "5013161370",  "name": "Magnetic Wireless Charger 15W"},
-    {"item_id": "553018247",   "name": "Cshidworld Wireless On-Ear Headphones"},
-    {"item_id": "185020236",   "name": "New bee Bluetooth Earpiece"},
-    {"item_id": "10977767707", "name": "Great Value Paper Towels (6 Triple Rolls)"},
-    {"item_id": "3945859864",  "name": "Great Value Paper Towels (White, 12 Double Rolls)"},
-    {"item_id": "3799647206",  "name": "Great Value Paper Towels (6 Double Rolls)"}
+    {"item_id": "11381374703", "name": "Apple AirPods 4"},
+    {"item_id": "11384707978", "name": "Apple AirPods 4 with Active Noise Cancellation"}
   ]
 }

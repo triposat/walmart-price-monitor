@@ -121,7 +121,10 @@ class WalmartPriceScraper:
         # Empty PROXIES means run in direct mode (curl_cffi TLS impersonation
         # alone). Suitable for short-term testing; configure real ISP proxies
         # for sustained scale.
-        self._proxy_pool = cycle(PROXIES) if PROXIES else None
+        # Shuffle on startup so a burned proxy is not retried first every cycle.
+        # A real production version would track per-proxy health and quarantine
+        # repeatedly-failing IPs; this is a low-cost first defense.
+        self._proxy_pool = cycle(random.sample(PROXIES, len(PROXIES))) if PROXIES else None
         if self._proxy_pool is None:
             logger.warning(
                 "No PROXIES configured — running in direct mode. "
@@ -291,10 +294,13 @@ class WalmartPriceScraper:
         # that anti-bot systems use as one of their detection signals.
         time.sleep(random.uniform(3, 7))
 
+        # Catch RetryableError only. fetch_product_page raises a plain Exception
+        # for permanent 4xx responses that should NOT retry across products;
+        # those need to surface to the caller, not get swallowed here.
         try:
             html = self.fetch_product_page(item_id)
-        except Exception as e:
-            logger.error(f"Fetch failed for {item_id}: {e}")
+        except RetryableError as e:
+            logger.error(f"Retries exhausted for {item_id}: {e}")
             return None
 
         if html is None:
