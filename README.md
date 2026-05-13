@@ -6,6 +6,12 @@ every 30 minutes on free GitHub Actions. Each run appends new readings to
 repository so the history is kept between runs. Alerts land in Slack (or any
 other Apprise-supported channel) on real price drops.
 
+> The accompanying blog post walks through the full reasoning behind the stack
+> choices (curl_cffi vs Selenium, the `__NEXT_DATA__` parser, the
+> `CHALLENGE_MARKERS` false-positive war story, how the alert thresholds were
+> tuned, and the deployment story). This README focuses on getting the project
+> running in your own account.
+
 ## Why this stack
 
 Walmart product pages embed the full pricing payload in a single Next.js JSON
@@ -117,29 +123,27 @@ knows what kind of price they are looking at.
 
 ## Setup (one-time, about 10 minutes)
 
-Fork this repository (or clone it locally) so you have the starter files,
-then follow these steps to configure your own copy.
+**Requirements:** a GitHub account (free tier is enough). For optional local
+testing: Python 3.10 or newer.
 
-### 1. Create a private GitHub repository
+### 1. Fork this repository
 
-Use a private repository, not a public one. The workflow commits
-`price_history.json` automatically, which records the products you monitor
-and their price changes over time. A private repository keeps this data out
-of search engine indexes.
+Click the **Fork** button in the top-right of this repo's GitHub page. GitHub
+creates a copy under your account. That copy is where you will configure
+secrets and where the scheduled workflow will run.
 
-### 2. Push these files to the repository
+**Make your fork private.** The workflow auto-commits `price_history.json`,
+which records the products you monitor and their prices over time. A private
+fork keeps this data out of search-engine indexes:
 
-```bash
-cd path/to/this/folder
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin git@github.com:YOUR_USERNAME/YOUR_REPO.git
-git push -u origin main
-```
+- Open your fork → **Settings** → scroll to the bottom of the General page →
+  **Change repository visibility** → **Make private** → confirm.
 
-### 3. Create a Slack incoming webhook
+If you would rather start from a downloaded ZIP, clone the repo locally,
+remove the existing `.git` directory, then `git init` and push to your own
+new repository instead of forking.
+
+### 2. Create a Slack incoming webhook
 
 1. Open https://api.slack.com/apps and click **Create New App** → **From scratch**.
 2. Give it a name (e.g. "Walmart Price Monitor") and pick the workspace.
@@ -147,30 +151,15 @@ git push -u origin main
 4. Click **Add New Webhook to Workspace**, pick the channel that should
    receive alerts, and click **Allow**.
 5. Copy the webhook URL. It looks like
-   `https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX`.
+   `https://hooks.slack.com/services/<TEAM_ID>/<BOT_ID>/<SECRET>`.
 
-### 4. Add two GitHub Secrets
+### 3. Add GitHub Secrets
 
-In your repository, go to **Settings → Secrets and variables → Actions → New repository secret**, then add the following two secrets.
+In your fork, go to **Settings → Secrets and variables → Actions → New repository secret**.
 
-**Secret 1: `PROXIES`**
+**`APPRISE_URLS` (required)**
 
-One proxy per line, in the format `host:port:user:password`:
-
-```
-proxy1.example.com:8000:your_user:your_pass
-proxy2.example.com:8001:your_user:your_pass
-proxy3.example.com:8002:your_user:your_pass
-...
-```
-
-ISP proxies are strongly recommended for Walmart specifically. Datacenter
-ASNs (AWS, OVH, Hetzner, DigitalOcean) hit the Akamai challenge on most
-requests; consumer-ISP IPs pass through far more often.
-
-**Secret 2: `APPRISE_URLS`**
-
-For Slack via the webhook from step 3, convert the URL to Apprise's `slack://`
+For Slack via the webhook from step 2, convert the URL to Apprise's `slack://`
 format. The simplest pattern is:
 
 ```
@@ -215,7 +204,27 @@ APPRISE_URLS="slack://T0000/B0000/XYZ" python force_alert.py
 The resulting Slack message renders exactly what a real price-drop alert
 would look like, with all optional rows (`vs Was`, `Per unit`, `Tags`) populated.
 
-### 5. Edit `products.json`
+**`PROXIES` (optional)**
+
+For short-term testing or roughly under 100 product fetches per day, leave
+this secret unset. The scraper runs in direct mode via `curl_cffi`'s Chrome
+impersonation, which passes Walmart's first-pass Akamai check from most IPs.
+
+For sustained scale (anything beyond a few hours of continuous runs, or more
+than ~50 products at hourly cadence), add ISP proxies. One proxy per line,
+in the format `host:port:user:password`:
+
+```
+proxy1.example.com:8000:your_user:your_pass
+proxy2.example.com:8001:your_user:your_pass
+proxy3.example.com:8002:your_user:your_pass
+...
+```
+
+Datacenter ASNs (AWS, OVH, Hetzner, DigitalOcean) hit the Akamai challenge
+on most Walmart requests; consumer-ISP IPs pass through far more often.
+
+### 4. Edit `products.json`
 
 Replace the example item IDs with the products you want to monitor. Each
 entry needs two fields: `item_id` and a recognizable `name`. The `item_id` is
@@ -231,11 +240,43 @@ There is no target price field. An alert is sent when a price drop crosses
 the thresholds defined in `storage.py`. Commit and push your changes when
 you are done.
 
-### 6. Trigger the first run manually
+**Forking from this template?** The repo ships with an inherited
+`price_history.json` containing demo readings from the original deployment.
+You will not get alerts on those products, only on the ones in your edited
+`products.json`. If you want to start with a clean baseline file, delete it
+and let the next workflow run recreate it:
+
+```bash
+git rm price_history.json
+git commit -m "Clean inherited price history before first run"
+git push
+```
+
+If you skip this, the inherited readings age out automatically after 30 days
+(per `HISTORY_RETENTION_DAYS` in `storage.py`).
+
+### 5. Trigger the first run manually
 
 Open the **Actions** tab in your repository, select **Walmart Price Monitor**,
 and click **Run workflow**. This first run confirms that your secrets are
 configured correctly. After this, runs happen automatically every 30 minutes.
+
+## Test locally first (optional)
+
+You can run one full scrape-and-alert cycle on your laptop before deploying
+to GitHub Actions. Useful for sanity-checking the scraper, the product list,
+and the Slack format end-to-end.
+
+```bash
+pip install -r requirements.txt
+APPRISE_URLS="slack://T0000/B0000/XYZ" python run_locally.py --once
+```
+
+The `--once` flag runs a single cycle and exits. Drop it (and optionally pass
+`--interval 30`) to keep the loop running every 30 minutes on your machine.
+
+No proxies needed for local runs: `run_locally.py` stubs `PROXIES` and the
+scraper falls back to direct mode via `curl_cffi`'s Chrome impersonation.
 
 ## Important limitations
 
