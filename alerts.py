@@ -1,11 +1,5 @@
-# alerts.py: multi-channel alerts via apprise, configured from environment variable.
-#
-# Slack-friendly formatting:
-#   - Plain text body so Slack auto-renders the product URL as a clickable link.
-#   - Tagged seller type ("WALMART" vs "3RD-PARTY") because third-party seller
-#     prices are noisier than Walmart-direct prices and the reader should know.
-#   - Offer-type tag (ROLLBACK / CLEARANCE / REDUCED) and event-pricing tag
-#     surfaced when present, since these affect how the reader should act.
+# alerts.py: multi-channel alerts via apprise, configured from APPRISE_URLS.
+# Body is plain text so Slack auto-renders the product URL as a link.
 
 import os
 import apprise
@@ -30,17 +24,7 @@ for url in os.environ.get("APPRISE_URLS", "").strip().splitlines():
 
 
 def _format_body(result: PriceResult, prior_price: float) -> str:
-    """Build the Slack-friendly alert body.
-
-    Layout, in this order so the reader sees what matters first:
-      1. Product title (from the live page, not the configured nickname)
-      2. Previous / Current / Drop (the 24-hour baseline comparison)
-      3. vs MSRP / vs Was Price (when Walmart shows one — separate signal)
-      4. Per-unit price (when Walmart shows one — useful on groceries)
-      5. Tags: offer-type, event-pricing, third-party-seller (when relevant)
-      6. Stock status
-      7. Product URL (last so it does not push content out of view)
-    """
+    """Build the Slack alert body. Order: title, price comparison, MSRP anchor, per-unit, tags, stock, URL."""
     # Caller has verified result.price is not None.
     assert result.price is not None
 
@@ -85,8 +69,7 @@ def _format_body(result: PriceResult, prior_price: float) -> str:
     if result.offer_type:
         tags.append(result.offer_type.replace("Price", "").upper())
     if result.is_price_event:
-        # priceFlip / specialBuy are limited-time events; the reader
-        # should treat the alert with more urgency than a regular markdown.
+        # priceFlip / specialBuy are limited-time events; tag distinguishes them from regular markdowns.
         tags.append("EVENT-PRICING")
     # Third-party-seller flag. Walmart-direct prices are stable; marketplace
     # seller prices change more often. INTERNAL = Walmart, anything else
@@ -107,12 +90,7 @@ def _format_body(result: PriceResult, prior_price: float) -> str:
 
 
 def send_alert(result: PriceResult, product: ProductConfig, prior_price: float) -> bool:
-    """Send a price-drop alert. Returns True if delivery confirmed, False otherwise.
-
-    The caller uses the return value to decide whether to mark the reading as
-    alerted in TinyDB. Marking on success only is what keeps the cooldown
-    correct across transient Slack/Apprise outages.
-    """
+    """Return True on confirmed delivery. Caller marks `alerted` in TinyDB only on True so the cooldown survives transient Slack/Apprise outages."""
     assert result.price is not None, "send_alert requires a non-None result.price"
 
     title = f"Price Drop: {product.name}"

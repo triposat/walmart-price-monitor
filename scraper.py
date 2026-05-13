@@ -37,11 +37,7 @@ class PriceResult(BaseModel):
 
 
 class RetryableError(Exception):
-    """Temporary server-side error or anti-bot challenge.
-
-    Raising this signals the retry decorator to try again with the next
-    proxy in the pool. Permanent errors raise a plain Exception instead.
-    """
+    """Raised on transient failures (5xx, 429, challenge). Triggers retry with the next proxy. Permanent errors raise plain Exception."""
 
 
 # Walmart embeds the full product payload in a single Next.js JSON blob at
@@ -50,13 +46,11 @@ class RetryableError(Exception):
 # and no public API for unauthenticated reads.
 NEXT_DATA_SELECTOR = "script#__NEXT_DATA__"
 
-# Walmart's soft challenge returns HTTP 200 with a challenge body, so the
-# body must be inspected on every successful response.
+# Soft challenge returns HTTP 200 with a challenge body, so the body needs
+# inspecting on every successful response.
 #
-# These two markers are challenge-page specific. Generic terms like
-# "perimeterx" or "px-captcha" would false-positive on real product pages
-# because Walmart's Content Security Policy header lists *.perimeterx.net
-# (and similar) as allowed third-party domains on every page it serves.
+# Narrow markers only. "perimeterx" / "px-captcha" false-positive on real
+# product pages because Walmart's CSP meta tag lists *.perimeterx.net.
 CHALLENGE_MARKERS = (
     "activate and hold the button",  # Akamai "Press & Hold" UI text
     "<title>robot or human",         # title tag, only on the challenge page
@@ -76,7 +70,7 @@ PRICE_SELECTORS = [
 
 
 def _coerce_price(node):
-    """Pull a float price from a Walmart price node, tolerating missing fields."""
+    """Return float price from a Walmart price node, or None when absent or malformed."""
     if not isinstance(node, dict):
         return None
     price = node.get("price")
@@ -122,12 +116,10 @@ class WalmartPriceScraper:
         # alone). Suitable for short-term testing; configure real ISP proxies
         # for sustained scale.
         # Shuffle on startup so a burned proxy is not retried first every cycle.
-        # A real production version would track per-proxy health and quarantine
-        # repeatedly-failing IPs; this is a low-cost first defense.
         self._proxy_pool = cycle(random.sample(PROXIES, len(PROXIES))) if PROXIES else None
         if self._proxy_pool is None:
             logger.warning(
-                "No PROXIES configured — running in direct mode. "
+                "No PROXIES configured; running in direct mode. "
                 "Akamai may flag this IP after sustained requests."
             )
 
@@ -221,8 +213,8 @@ class WalmartPriceScraper:
         tbo = product.get("topBoostedOffer") or {}
         buybox_price_display = tbo.get("priceString") if isinstance(tbo, dict) else None
 
-        # availabilityStatusV2 provides a human-readable display string;
-        # availabilityStatus is the raw enum. Keep both — display for alerts,
+        # availabilityStatusV2 carries the human-readable display string;
+        # availabilityStatus is the raw enum. Keep both: display for alerts,
         # code for downstream filtering.
         avail_v2 = product.get("availabilityStatusV2") or {}
         availability = avail_v2.get("display") if isinstance(avail_v2, dict) else None
@@ -231,7 +223,7 @@ class WalmartPriceScraper:
 
         # Event pricing flags. These distinguish a permanent markdown
         # ("rollback") from an event-driven temporary price ("priceFlip"
-        # or "specialBuy" — Walmart's terms for limited-time events).
+        # or "specialBuy", Walmart's terms for limited-time events).
         event_attrs = product.get("eventAttributes") or {}
         is_price_event = bool(event_attrs.get("priceFlip") or event_attrs.get("specialBuy"))
 
@@ -276,8 +268,7 @@ class WalmartPriceScraper:
         if parsed is not None:
             return PriceResult(item_id=item_id, **parsed)
 
-        # Fallback path. Reachable only if Walmart removes or restructures
-        # __NEXT_DATA__, which has not happened in years of practice.
+        # Fallback path. Reachable only if Walmart removes or restructures __NEXT_DATA__.
         logger.warning(f"__NEXT_DATA__ missing for {item_id}; falling back to CSS")
         title_tag = soup.select_one("h1[itemprop='name']") or soup.select_one("h1")
         title = title_tag.get_text(strip=True) if title_tag else "Unknown"
@@ -290,13 +281,11 @@ class WalmartPriceScraper:
         )
 
     def get_price(self, item_id):
-        # Random delay between requests breaks the uniform timing pattern
-        # that anti-bot systems use as one of their detection signals.
+        # Random delay breaks the uniform request-timing pattern anti-bot systems flag on.
         time.sleep(random.uniform(3, 7))
 
-        # Catch RetryableError only. fetch_product_page raises a plain Exception
-        # for permanent 4xx responses that should NOT retry across products;
-        # those need to surface to the caller, not get swallowed here.
+        # Catch RetryableError only. Permanent 4xx raises plain Exception
+        # and must surface to the caller, not get swallowed here.
         try:
             html = self.fetch_product_page(item_id)
         except RetryableError as e:

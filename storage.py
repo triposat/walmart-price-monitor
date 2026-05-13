@@ -1,11 +1,9 @@
 # storage.py: TinyDB-backed price history + decision layer.
 #
-# Alert policy: send an alert when all three conditions are true:
-#   1. The current price is a new low compared to the last 24 hours.
-#   2. The drop is at least 2% AND at least $1 (the stricter limit applies).
-#   3. No alert has been sent for this product in the last 6 hours.
-#
-# Adjust the constants below to change the alert behavior.
+# Alert policy: fire only when all three are true:
+#   1. Current price is a new low across the 24-hour window.
+#   2. Drop is at least 2% AND at least $1.
+#   3. No alert has fired on this product in the last 6 hours.
 
 from datetime import datetime, timedelta
 from loguru import logger
@@ -20,7 +18,7 @@ HISTORY_RETENTION_DAYS = 30 # readings older than this are removed automatically
 
 
 def prune_old_entries(db, retention_days=HISTORY_RETENTION_DAYS):
-    """Delete readings older than retention_days. Keeps the file size bounded."""
+    """Delete readings older than retention_days to bound the file size."""
     P = Query()
     cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
     removed = db.remove(P.timestamp < cutoff)
@@ -38,7 +36,7 @@ def get_baseline_price(db, item_id, window_hours=BASELINE_WINDOW_HOURS):
 
 
 def get_last_alert_time(db, item_id):
-    """Return the timestamp of the most recent reading we alerted on, or None."""
+    """Return the timestamp of the most recent alerted reading, or None."""
     P = Query()
     alerted = db.search((P.item_id == item_id) & (P.alerted == True))  # noqa: E712
     if not alerted:

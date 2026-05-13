@@ -1,4 +1,4 @@
-# force_alert.py — sends one Slack alert with test data matching the post's example.
+# force_alert.py: sends one Slack alert with hard-coded test data.
 # Run with: APPRISE_URLS="slack://..." python force_alert.py
 import os
 import sys

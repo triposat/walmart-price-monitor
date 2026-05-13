@@ -1,8 +1,5 @@
-# check_once.py: single-shot price check, designed to be invoked by cron or GitHub Actions.
-#
-# Storage + decision logic lives in storage.py. This module is the runner only:
-# load products, fetch prices, persist readings, deliver alerts, and exit with
-# a code GitHub Actions or systemd can use to fire failure notifications.
+# check_once.py: single-shot price check for cron or GitHub Actions.
+# Runner only; storage + decision logic lives in storage.py.
 
 import sys
 import json
@@ -59,8 +56,7 @@ def main():
         delivered = False
 
         if should_alert:
-            # decide() only returns True when baseline is not None,
-            # so the assertion is safe and silences type checkers.
+            # decide() only returns True when baseline is not None; assert satisfies type checkers.
             assert baseline is not None
             logger.success(
                 f"PRICE DROP! {product.name}: ${current:.2f} | {reason}"
@@ -75,9 +71,7 @@ def main():
         else:
             logger.info(f"{product.name}: ${current:.2f} | {reason}")
 
-        # Mark alerted only on confirmed delivery. A failed alert leaves
-        # alerted=False so the next cycle can retry once the cooldown logic
-        # sees no recent successful alert.
+        # Mark alerted only on confirmed delivery (see send_alert).
         record = result.model_dump(mode="json")
         record["alerted"] = delivered
         db.insert(record)

@@ -1,21 +1,13 @@
 #!/usr/bin/env python3
-"""Local continuous runner — no proxies, no GitHub Actions.
-
-Runs the same check_once.py logic on a loop on your laptop. Sends real
-Slack alerts via Apprise. Works without ISP proxies for short-to-medium
-durations because curl_cffi's chrome impersonation passes Akamai's
-first-pass check from datacenter IPs.
+"""Local continuous runner. Runs check_once.py's logic on a loop on a laptop.
 
 USAGE:
     APPRISE_URLS="slack://A/B/C" python run_locally.py
     APPRISE_URLS="slack://A/B/C" python run_locally.py --interval 5    # check every 5 minutes
     APPRISE_URLS="slack://A/B/C" python run_locally.py --once         # one cycle and exit
 
-The PROXIES env var is OPTIONAL. If unset, the scraper goes direct via
-curl_cffi (verified to pass Akamai's first-pass check on initial requests).
-If set, the scraper rotates through your proxy pool — recommended for
-sustained scale where the same IP making hundreds of requests per day
-would eventually flag.
+PROXIES is optional. Unset = direct mode via curl_cffi impersonation; set =
+rotate through the configured pool.
 """
 import argparse
 import os
@@ -24,8 +16,8 @@ import time
 import json
 from datetime import datetime, timedelta
 
-# Make PROXIES optional. If not set, we stub it out and patch the scraper
-# to send requests without a proxy.
+# Make PROXIES optional. If unset, stub the value and patch the scraper to
+# skip the proxy kwarg.
 os.environ.setdefault("PROXIES", "stub.example.com:8080:user:pass")
 NO_PROXY = "PROXIES" not in os.environ or os.environ["PROXIES"].startswith("stub.example.com")
 
@@ -51,7 +43,7 @@ if NO_PROXY:
         kwargs.pop("proxy", None)
         return _orig_get(url, **kwargs)
     curl_requests.get = _direct_get
-    logger.info("No real PROXIES set — going direct via curl_cffi chrome impersonation")
+    logger.info("No real PROXIES set; going direct via curl_cffi chrome impersonation")
 
 
 def run_one_cycle():
